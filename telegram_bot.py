@@ -16,9 +16,7 @@ app = Client("my_bot", api_id=api_id, api_hash=api_hash)
 
 #I am alive
 async def main():
-    async with Client("my_bot", api_id, api_hash) as app:
-        await app.send_message("me", "I am alive")
-        print("I am alive")
+    print("I am alive")
     asyncio.gather(detect_text_change(), detect_new_files())
 
 # CHATS ID
