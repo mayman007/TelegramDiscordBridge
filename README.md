@@ -40,3 +40,5 @@ pip install -r requirements.txt
 python main.py
 ```
 8. You will see a message in the terminal asking for a phone number or a bot token, this is needed by Telegram only the first time you run the bridge. So either enter your phone number or your [bot token](https://core.telegram.org/bots/features#creating-a-new-bot)
+
+PS: Make sure to give the Telegram bot access to messages.
