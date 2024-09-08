@@ -1,3 +1,5 @@
+import time
+import aiosqlite
 import discord
 from discord.ext import commands
 import asyncio
@@ -16,20 +18,30 @@ async def check_chat(chat):
             return channel
 
 async def detect_text_change(self):
-    json_file = "messages/telegram/text.json"
-    last_modified = os.path.getmtime(json_file)
-    while True:
-        await asyncio.sleep(0.5)
-        new_modified = os.path.getmtime(json_file)
-        if new_modified > last_modified:
-            with open(json_file, "r") as f:
-                data = json.load(f)
-            content = data["message"]["content"]
-            sender = data["message"]["sender"]
-            chat = data["message"]["chat"]
-            replied_to_text = data["message"]["replied_to_text"]
-            replied_to_sender = data["message"]["replied_to_sender"]
-            last_modified = new_modified
+        db_file = "messages/telegram/text.db"
+        latest_timestamp = 0  # Initialize last_checked as None
+
+        while True:
+            await asyncio.sleep(0.2)
+            try:
+                async with aiosqlite.connect(db_file) as db:
+                    # Get the latest timestamp from the database
+                    async with db.execute('SELECT MAX(sent_at) FROM messages') as cursor:
+                        row = await cursor.fetchone()
+                        if row[0] > latest_timestamp:
+                            latest_timestamp = row[0]
+                            # Fetch and process new rows
+                            async with db.execute(
+                                'SELECT content, sender, chat, replied_to_text, replied_to_sender FROM messages WHERE sent_at = ?', (latest_timestamp,)
+                            ) as cursor:
+                                row = await cursor.fetchone()
+                                content, sender, chat, replied_to_text, replied_to_sender = row
+                        else:
+                            continue
+            except Exception as e:
+                print(f"Error: {e}")
+                continue
+
             channel = await check_chat(chat)
             limit = 1800
             async def reply_or_send(message_content):
@@ -81,7 +93,7 @@ async def detect_new_files(self):
                     else: await channel.send(file=discord.File(file_path), content=f"*{sender}:* [{file}]")
                 os.remove(file_path)
             else:
-                if file != "attachments.json" and file != "text.json": os.remove(f"messages/telegram/{file}")
+                if file != "attachments.json" and file != "text.json" and file != "text.db": os.remove(f"messages/telegram/{file}")
 
 class MyBot(commands.Bot):
     def __init__(self):
@@ -95,6 +107,15 @@ class MyBot(commands.Bot):
 
     async def on_ready(self):
         asyncio.gather(detect_text_change(self), detect_new_files(self))
+        async with aiosqlite.connect("messages/discord/text.db") as db:
+            # Create the table if it doesn't exist
+            await db.execute('''CREATE TABLE IF NOT EXISTS messages (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                content TEXT,
+                                sender TEXT,
+                                chat TEXT,
+                                sent_at INT
+                            )''')
 
 
 bot = MyBot()
@@ -136,17 +157,16 @@ async def on_message(message: discord.Message):
             json.dump(messages, f, sort_keys = True, indent = 4, ensure_ascii = False)
         await message.attachments[0].save(fp=file_path)
 
-    # Save text messages in text.json
-    json_file_path = "messages/discord/text.json"
-    with open(json_file_path, "r", encoding = "utf8") as f:
-        messages = json.load(f)
-    with open(json_file_path, "w", encoding = "utf8") as f:
-        sender = message.author.display_name
-        messages["message"] = {}
-        messages["message"]["content"] = message.content
-        messages["message"]["sender"] = sender
-        messages["message"]["chat"] = chname
-        json.dump(messages, f, sort_keys = True, indent = 4, ensure_ascii = False)
+    # Save text messages in text.db
+    db_file_path = "messages/discord/text.db"
+    sender = message.author.display_name
+    async with aiosqlite.connect(db_file_path) as db:
+        await db.execute('''INSERT INTO messages (content, sender, chat, sent_at) 
+                            VALUES (?, ?, ?, ?)''', 
+                        (message.content, sender, 
+                        chname, int(time.time())))
+        # Commit the changes
+        await db.commit()
 
 with open('settings.yaml', 'r') as file:
     data = yaml.safe_load(file)

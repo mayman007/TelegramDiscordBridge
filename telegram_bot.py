@@ -1,8 +1,10 @@
+import time
 from pyrogram import Client, filters, types
 import json
 import os
 import asyncio
 import yaml
+import aiosqlite
 
 
 with open('settings.yaml', 'r') as file:
@@ -18,6 +20,17 @@ app = Client("my_bot", api_id=api_id, api_hash=api_hash)
 async def main():
     print("I am alive")
     asyncio.gather(detect_text_change(), detect_new_files())
+    async with aiosqlite.connect("messages/telegram/text.db") as db:
+            # Create the table if it doesn't exist
+            await db.execute('''CREATE TABLE IF NOT EXISTS messages (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                content TEXT,
+                                sender TEXT,
+                                chat TEXT,
+                                replied_to_text TEXT,
+                                replied_to_sender TEXT,
+                                sent_at INT
+                            )''')
 
 # CHATS ID
 with open('settings.yaml', 'r') as file:
@@ -44,6 +57,7 @@ async def my_handler(client: Client, message: types.Message):
     if message.media_group_id:
         messages = await app.get_media_group(message.chat.id, message.id)
         for i, media in enumerate(messages):
+            await asyncio.sleep(0.5)
             if media.document: file_name = media.document.file_name
             elif media.photo:
                 file_name = "image"
@@ -74,18 +88,21 @@ async def my_handler(client: Client, message: types.Message):
             await client.download_media(media, file_name=file_path)
         # Save the caption if it's there
         if message.caption:
-            json_file_path = "messages/telegram/text.json"
-            with open(json_file_path, "r", encoding = "utf8") as f:
-                messages = json.load(f)
-            with open(json_file_path, "w", encoding = "utf8") as f:
-                try: sender = message.from_user.first_name + " " + message.from_user.last_name
-                except TypeError: sender = message.from_user.username
-                except AttributeError: sender = chname
-                messages["message"] = {}
-                messages["message"]["content"] = message.caption
-                messages["message"]["sender"] = sender
-                messages["message"]["chat"] = chname
-                json.dump(messages, f, sort_keys = True, indent = 4, ensure_ascii = False)
+            print(f"messahe caption: {message.caption}")
+            caption = message.caption
+            try: sender = message.from_user.first_name + " " + message.from_user.last_name
+            except TypeError: sender = message.from_user.username
+            except AttributeError: sender = chname
+            db_file_path = "messages/telegram/text.db"
+            # Save message in a SQLite database
+            async with aiosqlite.connect(db_file_path) as db:
+                await db.execute('''INSERT INTO messages (content, sender, chat, replied_to_text, replied_to_sender, sent_at) 
+                                    VALUES (?, ?, ?, ?, ?, ?)''', 
+                                (caption, sender, 
+                                chname, None, 
+                                None, int(time.time())))
+                # Commit the changes
+                await db.commit()
 
     # If message is an attachment
     elif message.media:
@@ -136,45 +153,45 @@ async def my_handler(client: Client, message: types.Message):
         # Save the caption if it's there
         if message.caption:
             caption = message.caption
-            json_file_path = "messages/telegram/text.json"
-            with open(json_file_path, "r", encoding = "utf8") as f:
-                messages = json.load(f)
-            with open(json_file_path, "w", encoding = "utf8") as f:
-                try: sender = message.from_user.first_name + " " + message.from_user.last_name
-                except TypeError: sender = message.from_user.username
-                except AttributeError: sender = chname
-                messages["message"] = {}
-                messages["message"]["content"] = caption
-                messages["message"]["sender"] = sender
-                messages["message"]["chat"] = chname
-                json.dump(messages, f, sort_keys = True, indent = 4, ensure_ascii = False)
+            try: sender = message.from_user.first_name + " " + message.from_user.last_name
+            except TypeError: sender = message.from_user.username
+            except AttributeError: sender = chname
+            db_file_path = "messages/telegram/text.db"
+            # Save message in a SQLite database
+            async with aiosqlite.connect(db_file_path) as db:
+                await db.execute('''INSERT INTO messages (content, sender, chat, replied_to_text, replied_to_sender, sent_at) 
+                                    VALUES (?, ?, ?, ?, ?, ?)''', 
+                                (caption, sender, 
+                                chname, None, 
+                                None, int(time.time())))
+                # Commit the changes
+                await db.commit()
 
     # If message is a text message
     else:
-        # Save text messages in text.json
+         # Save text messages in text.json
         replied_to = message.reply_to_message
         if replied_to == None:
-            replied_to_text = "None"
-            replied_to_sender = "None"
+            replied_to_text = None
+            replied_to_sender = None
         else:
             replied_to_text = replied_to.text
             try: replied_to_sender = replied_to.from_user.first_name + " " + replied_to.from_user.last_name
             except TypeError: replied_to_sender = replied_to.from_user.username
             except AttributeError: replied_to_sender = chname
-        json_file_path = "messages/telegram/text.json"
-        with open(json_file_path, "r", encoding = "utf8") as f:
-            messages = json.load(f)
-        with open(json_file_path, "w", encoding = "utf8") as f:
-            try: sender = message.from_user.first_name + " " + message.from_user.last_name
-            except TypeError: sender = message.from_user.username
-            except AttributeError: sender = chname
-            messages["message"] = {}
-            messages["message"]["content"] = message.text
-            messages["message"]["sender"] = sender
-            messages["message"]["chat"] = chname
-            messages["message"]["replied_to_text"] = replied_to_text
-            messages["message"]["replied_to_sender"] = replied_to_sender
-            json.dump(messages, f, sort_keys = True, indent = 4, ensure_ascii = False)
+        try: sender = message.from_user.first_name + " " + message.from_user.last_name
+        except TypeError: sender = message.from_user.username
+        except AttributeError: sender = chname
+        db_file_path = "messages/telegram/text.db"
+        # Save message in a SQLite database
+        async with aiosqlite.connect(db_file_path) as db:
+            await db.execute('''INSERT INTO messages (content, sender, chat, replied_to_text, replied_to_sender, sent_at) 
+                                VALUES (?, ?, ?, ?, ?, ?)''', 
+                            (message.text, sender, 
+                            chname, replied_to_text, 
+                            replied_to_sender, int(time.time())))
+            # Commit the changes
+            await db.commit()
 
 async def check_chat(chat):
     with open('settings.yaml', 'r') as file:
@@ -186,26 +203,37 @@ async def check_chat(chat):
             return chat_id
 
 async def detect_text_change():
-    # async with app:
-    json_file = "messages/discord/text.json"
-    last_modified = os.path.getmtime(json_file)
+    db_file = "messages/discord/text.db"
+    latest_timestamp = 0  # Initialize last_checked as None
     while True:
-        await asyncio.sleep(0.5)
-        new_modified = os.path.getmtime(json_file)
-        if new_modified > last_modified:
-            with open(json_file, "r") as f:
-                data = json.load(f)
-            content = data["message"]["content"]
-            sender = data["message"]["sender"]
-            chat = data["message"]["chat"]
-            last_modified = new_modified
-            if content == "": continue
-            chat_id = await check_chat(chat)
-            limit = 1800
-            if len(content) > limit:
-                whole_text = [content[i: i + limit] for i in range(0, len(content), limit)]
-                for part_of_text in whole_text: await app.send_message(chat_id, f"**{sender}:**\n{part_of_text}")
-            else: await app.send_message(chat_id, f"**{sender}:**\n{content}")
+        await asyncio.sleep(0.2)
+        try:
+            async with aiosqlite.connect(db_file) as db:
+                # Get the latest timestamp from the database
+                async with db.execute('SELECT MAX(sent_at) FROM messages') as cursor:
+                    row = await cursor.fetchone()
+                    if row[0] > latest_timestamp:
+                        latest_timestamp = row[0]
+                        # Fetch and process new rows
+                        async with db.execute(
+                            'SELECT content, sender, chat FROM messages WHERE sent_at = ?', (latest_timestamp,)
+                        ) as cursor:
+                            row = await cursor.fetchone()
+                            content, sender, chat = row
+                    else:
+                        continue
+        except Exception as e:
+            print(f"Error: {e}")
+            continue
+            
+        
+        if content == "": continue
+        chat_id = await check_chat(chat)
+        limit = 1800
+        if len(content) > limit:
+            whole_text = [content[i: i + limit] for i in range(0, len(content), limit)]
+            for part_of_text in whole_text: await app.send_message(chat_id, f"**{sender}:**\n{part_of_text}")
+        else: await app.send_message(chat_id, f"**{sender}:**\n{content}")
 
 async def detect_new_files():
     while True:
@@ -242,7 +270,7 @@ async def detect_new_files():
                     elif ".pdf" in file_path or ".apk" in file_path: await app.send_document(chat_id, file_path, caption=f"**{sender}:**")
                 os.remove(file_path)
             else:
-                if file != "attachments.json" and file != "text.json":
+                if file != "attachments.json" and file != "text.json" and file != "text.db":
                     os.remove(f"messages/discord/{file}")
 
 app.run(main())
